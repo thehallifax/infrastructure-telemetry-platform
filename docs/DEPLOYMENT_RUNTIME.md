@@ -18,14 +18,12 @@ vendor-supported Docker release that provides Compose v2.
 ## Clean installation
 
 ```bash
-git clone https://github.com/<organisation>/<repository> infrastructure-telemetry-platform
+git clone https://github.com/thehallifax/infrastructure-telemetry-platform.git
 cd infrastructure-telemetry-platform
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
 ./itp deploy
 ```
 
@@ -34,6 +32,9 @@ ignored runtime configuration, generates credentials, provisions managed
 Grafana dashboards, builds images, starts the stack, and prints the Grafana
 and InfluxDB URLs. InfluxDB storage is initialised by the container; no manual
 database step is required.
+Routine Docker output is captured so the default deployment transcript stays
+operator-focused. Use `./itp deploy --verbose` or set `ITP_VERBOSE=1` for full
+build and Compose output.
 
 For repeatable automation without enabling collectors:
 
@@ -93,6 +94,15 @@ directly inspecting a deployment. The CLI remains the preferred interface:
 Grafana is available at the URL printed by deploy. InfluxDB and Grafana expose
 container health checks; Doctor verifies platform configuration, Docker,
 services, connector registration, and reachable health surfaces.
+
+Display the active deployment's generated Grafana login without editing files:
+
+```bash
+./itp credentials grafana
+```
+
+The command is read-only. The credentials and all other runtime material remain
+under the ignored `runtime/deployments/<deployment-id>/` directory.
 
 ## Configure discovery and collectors
 

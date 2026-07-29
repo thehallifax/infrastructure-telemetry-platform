@@ -60,9 +60,19 @@ connectors:
     guided_setup: false
     configuration_mode: manual
     credential_fields:
-      - {id: host, env: FORTIGATE_HOST, required: true, secret: false}
-      - {id: api_token, env: FORTIGATE_API_TOKEN, required: true, secret: true}
+      - id: host
+        env: FORTIGATE_HOST
+        required: true
+        secret: false
+        configuration_field: collectors.fortigate.host
+      - id: api_token
+        env: FORTIGATE_API_TOKEN
+        required: true
+        secret: true
+        prompt: {label: API token, example: read-only API token, help: FortiGate REST API administrator token, default: '', value_type: secret, sensitive: true}
     configuration_fields: [collectors.fortigate.host, collectors.fortigate.site]
+    configuration_prompts:
+      - {field: collectors.fortigate.host, label: FortiGate host, example: firewall.example.invalid, help: FortiGate hostname or HTTPS URL; a non-default port may be included; do not include /api/v2, default: '', value_type: host, sensitive: false, normalizer: https-host}
     secret_handling:
       templates: [secrets/fortigate.env.example]
       scope: root-or-profile
@@ -101,9 +111,19 @@ connectors:
     guided_setup: false
     configuration_mode: manual
     credential_fields:
-      - {id: organization_id, env: MIST_ORG_ID, required: true, secret: false}
-      - {id: api_token, env: MIST_API_TOKEN, required: true, secret: true}
+      - id: organization_id
+        env: MIST_ORG_ID
+        required: true
+        secret: false
+        prompt: {label: Organisation ID, example: 00000000-0000-0000-0000-000000000000, help: Mist organisation UUID, default: '', value_type: uuid, sensitive: false}
+      - id: api_token
+        env: MIST_API_TOKEN
+        required: true
+        secret: true
+        prompt: {label: API token, example: Mist API token, help: Read-only Mist API token, default: '', value_type: secret, sensitive: true}
     configuration_fields: [collectors.mist.base_url]
+    configuration_prompts:
+      - {field: collectors.mist.base_url, label: Juniper Mist API base URL, example: 'https://api.ac2.mist.com', help: Enter the regional API origin only; do not include /api/v1, default: 'https://api.mist.com', value_type: url, sensitive: false, normalizer: https-origin}
     secret_handling:
       templates: [secrets/mist.env.example]
       scope: root-or-profile
@@ -144,8 +164,15 @@ connectors:
     guided_setup: false
     configuration_mode: manual
     credential_fields:
-      - {id: authorization_key, env: PAPERCUT_AUTHORIZATION_KEY, env_aliases: [PAPERCUT_AUTHORIZATION], required: false, secret: true}
+      - id: authorization_key
+        env: PAPERCUT_AUTHORIZATION_KEY
+        env_aliases: [PAPERCUT_AUTHORIZATION]
+        required: false
+        secret: true
+        prompt: {label: Authorization key, example: optional System Health authorization key, help: Leave blank when the endpoint does not require authorization, default: '', value_type: secret, sensitive: true}
     configuration_fields: [collectors.papercut.base_url, collectors.papercut.site]
+    configuration_prompts:
+      - {field: collectors.papercut.base_url, label: PaperCut MF HTTPS base URL, example: 'https://papercut.example.invalid', help: Include the HTTPS port when required; /api/health is removed automatically, default: '', value_type: host, sensitive: false, normalizer: papercut-health-origin}
     secret_handling:
       templates: [secrets/papercut.env.example]
       scope: root-or-profile
