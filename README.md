@@ -4,6 +4,10 @@ ITP turns infrastructure collectors into vendor-neutral inventory, telemetry,
 service health, operational findings, notifications, and managed Grafana
 dashboards.
 
+Deployment identity, telemetry validation, collector execution health, and
+dashboard scoping are framework-owned, so vendor site names cannot fragment
+operational views.
+
 ## Deploy in one command
 
 Install Docker Desktop or Docker Engine with Compose v2, then:
@@ -66,6 +70,7 @@ tree.
 - [security and secrets](docs/SECURITY_AND_SECRETS.md)
 - [upgrades](docs/UPGRADE.md)
 - [architecture](docs/architecture.md)
+- [telemetry hardening contract](docs/telemetry-hardening.md)
 
 ITP is Alpha software. Validate collectors and backup runtime data before
 production use. See [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,6 +1,7 @@
 schema_version: 1
 connectors:
   - id: aruba
+    runtime_modes: [central]
     display_name: HPE Aruba Networking Central
     vendor: HPE Aruba Networking
     domains:
@@ -52,6 +53,7 @@ connectors:
       - hpe-aruba-central
     notes: Read-only Aruba Central REST collector with OAuth renewal; guided setup is unavailable.
   - id: fortigate
+    runtime_modes: [edge]
     display_name: FortiGate
     vendor: Fortinet
     domains: [firewall, internet, switching]
@@ -84,6 +86,7 @@ connectors:
     notes: Native read-only API collector; credential onboarding remains manual.
 
   - id: hyperv
+    runtime_modes: [central]
     display_name: Microsoft Hyper-V
     vendor: Microsoft
     domains: [servers, virtualisation]
@@ -103,6 +106,7 @@ connectors:
     notes: Profile-scoped read-only PowerShell collection; guided setup is unavailable.
 
   - id: mist
+    runtime_modes: [central]
     display_name: Juniper Mist
     vendor: Juniper Networks
     domains: [switching, wireless]
@@ -135,6 +139,7 @@ connectors:
     notes: Native read-only cloud API collector; regional endpoint selection is manual.
 
   - id: paloalto
+    runtime_modes: [edge]
     display_name: Palo Alto PAN-OS
     vendor: Palo Alto Networks
     domains: [firewall, internet]
@@ -156,6 +161,7 @@ connectors:
     notes: Native read-only PAN-OS XML API collector; guided setup is unavailable.
 
   - id: papercut
+    runtime_modes: [central]
     display_name: PaperCut MF
     vendor: PaperCut
     domains: [printing, servers]
@@ -184,6 +190,7 @@ connectors:
     notes: Read-only PaperCut MF System Health JSON API collector; guided setup remains manual.
 
   - id: proxmox
+    runtime_modes: [central]
     display_name: Proxmox VE
     vendor: Proxmox Server Solutions
     domains: [servers, virtualisation]
@@ -205,6 +212,7 @@ connectors:
     notes: Profile-scoped read-only API provider; guided setup is unavailable.
 
   - id: snmp
+    runtime_modes: [edge]
     display_name: SNMP Infrastructure
     vendor: Multi-vendor
     domains: [environmental, power, printing, servers, switching, wireless]
@@ -226,6 +234,7 @@ connectors:
     notes: Generic discovery and Telegraf generation; device-specific setup remains manual.
 
   - id: vmware
+    runtime_modes: [central]
     display_name: VMware vSphere
     vendor: VMware
     domains: [servers, virtualisation]

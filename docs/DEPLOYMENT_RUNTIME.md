@@ -74,6 +74,10 @@ ports. `collectors.yml` owns enablement and non-secret connector configuration.
 `generated/deployment.env` contains generated stack credentials and is
 owner-readable only on macOS and Linux. Runtime files are ignored by Git.
 
+Deployment metadata is authoritative for telemetry. It owns stable deployment,
+customer and site IDs plus display name, timezone, region, and currency where
+configured. Connectors cannot override these values.
+
 ## Verify health
 
 ```bash
@@ -94,6 +98,10 @@ directly inspecting a deployment. The CLI remains the preferred interface:
 Grafana is available at the URL printed by deploy. InfluxDB and Grafana expose
 container health checks; Doctor verifies platform configuration, Docker,
 services, connector registration, and reachable health surfaces.
+
+Doctor also checks canonical identity, runtime capabilities, telemetry schema,
+scheduler health, dashboard provisioning, datasource configuration, and
+service availability.
 
 Display the active deployment's generated Grafana login without editing files:
 

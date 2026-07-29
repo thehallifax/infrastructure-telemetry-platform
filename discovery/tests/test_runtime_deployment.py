@@ -74,7 +74,7 @@ def test_slug_and_non_interactive_first_deployment(tmp_path):
     assert environment["INFLUXDB_TOKEN"] == ""
     assert yaml.safe_load(
         (deployment.generated / "sites.yml").read_text())["sites"][0]["id"] == (
-            "example-school")
+            "site:example-school")
     config = yaml.safe_load(deployment.collectors.read_text())
     assert config["customer"] == config["customer_id"] == "example-school"
     assert config["collectors"]["snmp"]["enabled"] is True

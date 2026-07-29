@@ -22,6 +22,7 @@ PROMPT_VALUE_TYPES = frozenset({"host", "url", "uuid", "text", "secret"})
 PROMPT_NORMALIZERS = frozenset({
     "", "https-host", "https-origin", "papercut-health-origin",
 })
+RUNTIME_MODES = frozenset({"central", "edge", "cloud"})
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class ConnectorMetadata:
     remediation_command: str = ""
     dashboard_manifest: str = ""
     configuration_prompts: tuple[dict, ...] = ()
+    runtime_modes: tuple[str, ...] = ("central", "edge")
 
     @property
     def configuration_namespace(self):
@@ -73,6 +75,7 @@ class ConnectorMetadata:
         value["credential_fields"] = list(self.credential_fields)
         value["configuration_fields"] = list(self.configuration_fields)
         value["configuration_prompts"] = list(self.configuration_prompts)
+        value["runtime_modes"] = list(self.runtime_modes)
         value["aliases"] = list(self.aliases)
         value["manual_only"] = self.manual_only
         value["configuration_namespace"] = self.configuration_namespace
@@ -161,6 +164,8 @@ class ConnectorMetadataRegistry:
                         + str(raw["id"])),
                     dashboard_manifest=str(
                         raw.get("dashboard_manifest") or ""),
+                    runtime_modes=tuple(sorted(set(
+                        raw.get("runtime_modes") or ("central", "edge")))),
                 ))
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValueError("invalid connector registry entry") from exc
@@ -226,6 +231,10 @@ class ConnectorMetadataRegistry:
             if connector.configuration_mode not in CONFIGURATION_MODES:
                 raise ValueError(
                     f"connector {connector.id} has invalid configuration mode")
+            if (not connector.runtime_modes
+                    or set(connector.runtime_modes) - RUNTIME_MODES):
+                raise ValueError(
+                    f"connector {connector.id} has invalid runtime modes")
             if set(connector.capabilities) != set(CAPABILITIES) or any(
                     not isinstance(value, bool)
                     for value in connector.capabilities.values()):

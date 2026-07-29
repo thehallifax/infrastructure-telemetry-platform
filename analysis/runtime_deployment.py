@@ -315,6 +315,8 @@ class RuntimeDeploymentManager:
             "customer_id": identifier,
             "display_name": display_name,
             "timezone": timezone,
+            "region": "",
+            "currency": "",
             "platform": platform.system().casefold(),
             "deployment": {"mode": "standalone"},
             "network": {
@@ -330,6 +332,11 @@ class RuntimeDeploymentManager:
             "customer": identifier,
             "site_id": f"site:{identifier}",
             "site": f"site:{identifier}",
+            "site_name": display_name,
+            "identity": {
+                "customer_name": display_name,
+                "site_name": display_name,
+            },
             "discovery": {
                 "interval_seconds": 3600,
                 "concurrency": 1,
@@ -366,9 +373,9 @@ class RuntimeDeploymentManager:
         sites = {
             "deployment_model": "standalone",
             "sites": [{
-                "id": identifier,
+                "id": f"site:{identifier}",
                 "display_name": display_name,
-                "aliases": [],
+                "aliases": [identifier],
                 "enabled": True,
             }],
         }

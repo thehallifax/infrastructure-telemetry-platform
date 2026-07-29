@@ -1003,6 +1003,7 @@ def main():
         return
     if args.group == "dashboard":
         deployment = runtime_manager.select(args.deployment)
+        load_runtime_env(deployment.env_file)
         config = load_config(deployment.collectors)
         result = DashboardRegistry(
             ROOT, config, deployment.generated / "dashboard/managed",

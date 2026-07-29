@@ -32,3 +32,16 @@ requested twice.
 Connection tests execute the registered read-only collector inspection and
 return redacted output. Consult the collector-specific document when an
 endpoint, role, certificate, or regional API setting is required.
+
+## Collector lifecycle contract
+
+Every enabled connector follows:
+
+```text
+Discover → Collect → Normalise → Validate → Write → Health → Summary
+```
+
+Collectors provide source metadata and mapped values. Deployment identity,
+schema enforcement, writes, run health, and readiness belong to the framework.
+An edge-only connector in a central runtime remains visible as `skipped` with
+an explicit placement reason.
