@@ -1,0 +1,61 @@
+discovery/config.yml
+.env
+secrets/mist.env
+secrets/fortigate.env
+secrets/snmp.env
+runtime/inventory/*.json
+runtime/inventory/*.lock
+runtime/inventory/.inventory.lock
+telegraf/telegraf.d/generated/*.conf
+
+# Local service credentials
+secrets/**/*.env
+!secrets/**/*.env.example
+
+# Runtime and generated state
+runtime/
+!runtime/
+runtime/*
+!runtime/README.md
+backups/
+profiles/*/*.local.yml
+config/*.local.yml
+profiles/*/.env
+*.compose.override.yml
+
+# Local backup files
+*.backup
+*.backup-*
+
+# Runtime secrets
+secrets/*.env
+!secrets/*.env.example
+
+# Local Telegraf configs
+telegraf/telegraf.d/inputs/*.manual
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Pytest
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+*.sqlite
+*.sqlite3
+*.db
+
+# macOS
+.DS_Store

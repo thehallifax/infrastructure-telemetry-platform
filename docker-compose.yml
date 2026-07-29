@@ -1,0 +1,190 @@
+services:
+  influxdb3-core:
+    image: influxdb:3-core
+    env_file:
+      - ${ITP_ENV_FILE:-.env.example}
+      - path: ${ITP_SECRETS_DIR:-./secrets}/influxdb.env
+        required: false
+    ports:
+      - "${INFLUXDB_ADDRESS:-127.0.0.1}:${INFLUXDB_PORT:-8181}:8181"
+    command:
+      - influxdb3
+      - serve
+      - --node-id=${INFLUXDB_NODE_ID}
+      - --object-store=file
+      - --data-dir=/var/lib/influxdb3
+      - --disable-authz=health,ready
+    volumes:
+      - influxdb_data:/var/lib/influxdb3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8181/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  telegraf:
+    image: telegraf
+    command:
+      - telegraf
+      - --config
+      - /etc/telegraf/telegraf.conf
+      - --config-directory
+      - /etc/telegraf/telegraf.d
+      - --watch-config
+      - poll
+    depends_on:
+      influxdb3-core:
+        condition: service_healthy
+    # Optionally, you can switch to depend on influxdb3-enterprise if using that
+    environment:
+      - INFLUXDB_HOST=${INFLUXDB_HOST}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      - ITP_DEPLOYMENT_ID=${ITP_DEPLOYMENT_ID:-legacy}
+      - ITP_CUSTOMER_ID=${ITP_CUSTOMER_ID:-legacy}
+      - TELEGRAF_COLLECTION_INTERVAL=${TELEGRAF_COLLECTION_INTERVAL}
+      - HOSTNAME=telegraf
+    env_file:
+      - ${ITP_ENV_FILE:-.env.example}
+      - path: ${ITP_SECRETS_DIR:-./secrets}/influxdb.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/collector.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/snmp.env
+        required: false
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf
+      - ./telegraf/telegraf.d/canonical.conf:/etc/telegraf/telegraf.d/canonical.conf:ro
+      - ${ITP_TELEGRAF_DIR:-./runtime/telegraf-generated}:/etc/telegraf/telegraf.d/generated:ro
+    restart: unless-stopped
+
+  discovery:
+    build:
+      context: .
+      dockerfile: discovery/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${ITP_ENV_FILE:-.env.example}
+    environment:
+      - TZ=${TZ:-UTC}
+      - ITP_PROFILE=${ITP_PROFILE:-}
+      - ITP_DEPLOYMENT_ID=${ITP_DEPLOYMENT_ID:-legacy}
+      - ITP_CUSTOMER_ID=${ITP_CUSTOMER_ID:-legacy}
+      - ITP_CONNECTORS_CONFIG=/app/config/connectors.local.yml
+    volumes:
+      - ${ITP_DISCOVERY_CONFIG:-./discovery/config.yml}:/app/config.yml:ro
+      - ${ITP_CONNECTORS_CONFIG:-./config/connectors.local.example.yml}:/app/config/connectors.local.yml:ro
+      - ${ITP_SITES_CONFIG:-./config/sites.yml}:/app/config/sites.yml:ro
+      - ${ITP_RUNTIME_DIR:-./runtime}/inventory:/app/runtime/inventory
+      - ${ITP_RUNTIME_DIR:-./runtime}/telegraf-generated:/app/generated
+    command:
+      - python
+      - /app/discover.py
+      - run
+      - --config
+      - /app/config.yml
+
+  collector:
+    build:
+      context: .
+      dockerfile: discovery/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${ITP_ENV_FILE:-.env.example}
+      - path: ${ITP_SECRETS_DIR:-./secrets}/influxdb.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/collector.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/mist.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/fortigate.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/paloalto.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/papercut.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/aruba.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/snmp.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/vmware.env
+        required: false
+      - path: ${ITP_SECRETS_DIR:-./secrets}/proxmox.env
+        required: false
+    environment:
+      - ITP_RUNTIME_MODE=${ITP_RUNTIME_MODE:-central}
+      - INFLUXDB_HOST=${INFLUXDB_HOST}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - TZ=${TZ:-UTC}
+      - ITP_PROFILE=${ITP_PROFILE:-}
+      - ITP_DEPLOYMENT_ID=${ITP_DEPLOYMENT_ID:-legacy}
+      - ITP_CUSTOMER_ID=${ITP_CUSTOMER_ID:-legacy}
+      - ITP_CUSTOMER_NAME=${ITP_CUSTOMER_NAME:-}
+      - ITP_DEPLOYMENT_MODE=${ITP_DEPLOYMENT_MODE:-standalone}
+      - COLLECTOR_CONFIG=/app/config.yml
+      - ITP_RUNTIME_DIR=/app/runtime/${ITP_PROFILE:-legacy}
+      - COLLECTOR_HEALTH_PATH=/app/runtime/${ITP_PROFILE:-legacy}/collector-health
+      - SITES_CONFIG=/app/config/sites.yml
+      - ITP_CONNECTORS_CONFIG=/app/config/connectors.local.yml
+      - INVENTORY_PATH=/app/runtime/${ITP_PROFILE:-legacy}/inventory/devices.json
+      - DASHBOARD_MANAGED_OUTPUT=/app/runtime/${ITP_PROFILE:-legacy}/dashboard/managed
+      - DASHBOARD_PROVISIONING=/app/runtime/${ITP_PROFILE:-legacy}/dashboard/provisioning/dashboards.yml
+    volumes:
+      - ${ITP_DISCOVERY_CONFIG:-./discovery/config.yml}:/app/config.yml:ro
+      - ${ITP_CONNECTORS_CONFIG:-./config/connectors.local.example.yml}:/app/config/connectors.local.yml:ro
+      - ${ITP_SITES_CONFIG:-./config/sites.yml}:/app/config/sites.yml:ro
+      - ${ITP_RUNTIME_DIR:-./runtime}:/app/runtime/${ITP_PROFILE:-legacy}
+    command:
+      - python
+      - -m
+      - collectors
+      - run
+    healthcheck:
+      test: ["CMD-SHELL", "test -f \"$$ITP_RUNTIME_DIR/collector-health\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      influxdb3-core:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana
+    env_file:
+      - ${ITP_ENV_FILE:-.env.example}
+      - path: ${ITP_SECRETS_DIR:-./secrets}/influxdb.env
+        required: false
+    ports:
+      - "${GRAFANA_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ${ITP_DASHBOARD_DIR:-./runtime/dashboard}/provisioning:/etc/grafana/provisioning/dashboards:ro
+      - ${ITP_DASHBOARD_DIR:-./runtime/dashboard}:/var/lib/grafana/runtime-dashboard:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - TZ=${TZ:-UTC}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/runtime-dashboard/managed/infrastructure/itp-infrastructure-overview.json
+      - ITP_DEPLOYMENT_ID=${ITP_DEPLOYMENT_ID:-legacy}
+      - ITP_CUSTOMER_ID=${ITP_CUSTOMER_ID:-legacy}
+    depends_on:
+      influxdb3-core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # Or switch to influxdb3-enterprise as needed
+    restart: unless-stopped
+
+volumes:
+  influxdb_data:
+  grafana_data:

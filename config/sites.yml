@@ -1,0 +1,14 @@
+sites:
+  - id: example-corporate
+    display_name: "Northwind College"
+    aliases:
+      - example-corporate
+      - example-corporate
+      - example-corporate
+      - "Northwind College"
+      - "Northwind College P2P"
+
+  - id: example-school
+    display_name: "example-school Reference Site"
+    aliases:
+      - example-school

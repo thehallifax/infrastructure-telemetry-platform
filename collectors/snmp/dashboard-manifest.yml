@@ -1,0 +1,13 @@
+collector: snmp
+version: 1
+capabilities:
+  - inventory
+  - switching
+  - telemetry
+requires: []
+dashboards:
+  - uid: itp-snmp-overview
+    source: dashboards/network/snmp-overview.json
+    folder: Infrastructure
+    tags: [snmp, network, availability]
+    requires_capabilities: [switching]

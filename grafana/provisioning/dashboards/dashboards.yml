@@ -1,0 +1,92 @@
+apiVersion: 1
+providers:
+- name: ITP Managed Operations
+  orgId: 1
+  folder: Operations
+  folderUid: itp-folder-operations
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/operations
+- name: ITP Managed Infrastructure
+  orgId: 1
+  folder: Infrastructure
+  folderUid: itp-folder-infrastructure
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/infrastructure
+- name: ITP Managed Security
+  orgId: 1
+  folder: Security
+  folderUid: itp-folder-security
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/security
+- name: ITP Managed Wireless
+  orgId: 1
+  folder: Wireless
+  folderUid: itp-folder-wireless
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/wireless
+- name: ITP Managed Printing
+  orgId: 1
+  folder: Printing
+  folderUid: itp-folder-printing
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/printing
+- name: ITP Managed Compute
+  orgId: 1
+  folder: Compute
+  folderUid: itp-folder-compute
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/compute
+- name: ITP Managed Identity
+  orgId: 1
+  folder: Identity
+  folderUid: itp-folder-identity
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/identity
+- name: ITP Managed Virtualisation
+  orgId: 1
+  folder: Virtualisation
+  folderUid: itp-folder-virtualisation
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/virtualisation
+- name: ITP Managed Vendor
+  orgId: 1
+  folder: Vendor
+  folderUid: itp-folder-vendor
+  type: file
+  disableDeletion: false
+  allowUiUpdates: false
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/runtime-dashboard/managed/vendor
