@@ -66,7 +66,7 @@ MANIFESTS = {
              panels=("Sessions",)),
         _cap("interfaces", "Interface inventory",
              measurements=("interface",), services=("Internet",),
-             panels=("Interfaces",)),
+             panels=("Interface Status", "Interface Inventory")),
         _cap("wan_classification", "Authoritative WAN classification", "conditional",
              measurements=("interface",), fields=("is_wan",),
              services=("Internet",), panels=("WAN",),
@@ -193,8 +193,9 @@ def validate_manifest(payload):
 
 def _read(path, default):
     try:
-        return json.loads(Path(path).read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
+        value = json.loads(Path(path).read_text())
+        return value if isinstance(value, dict) else default
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return default
 
 
@@ -204,14 +205,33 @@ class CapabilityManifestEngine:
     def __init__(self, config, runtime_dir):
         self.config = config
         self.runtime_dir = Path(runtime_dir)
+        self._last_runtime_state = {}
 
     def _enabled(self, name):
         if name == "framework":
             return any(self._enabled(value) for value in MANIFESTS if value != "framework")
         return bool(self.config.get("collectors", {}).get(name, {}).get("enabled", False))
 
+    def _configured(self, name):
+        if name == "framework":
+            return self._enabled(name)
+        settings = self.config.get("collectors", {}).get(name, {})
+        if not isinstance(settings, dict) or not settings.get("enabled"):
+            return False
+        ignored = {
+            "enabled", "execution", "customer", "customer_id",
+            "customer_name", "site", "site_id", "site_name",
+        }
+        return any(
+            value not in (None, "", [], {})
+            for key, value in settings.items() if key not in ignored)
+
     def _runtime(self, name):
-        scheduler = _read(self.runtime_dir / "scheduler/state.json", {})
+        scheduler = _read(
+            self.runtime_dir / "scheduler/state.json",
+            self._last_runtime_state)
+        if scheduler:
+            self._last_runtime_state = scheduler
         if name == "framework":
             lifecycle = scheduler.get("lifecycle_state")
             return ({
@@ -267,6 +287,7 @@ class CapabilityManifestEngine:
         collectors = {}
         for name in sorted(MANIFESTS):
             enabled = self._enabled(name)
+            configured = self._configured(name)
             connector, source = self._runtime(name)
             items = []
             for declaration in sorted(MANIFESTS[name], key=lambda value: value.id):
@@ -318,9 +339,18 @@ class CapabilityManifestEngine:
                                    self.config.get("site") or ""),
                 },
                 "execution": {
-                    "configured": name == "framework" or name in
-                                  self.config.get("collectors", {}),
+                    "known": True,
+                    "discovered": bool(
+                        connector.get("last_discovery_attempt")),
+                    "selected": enabled,
+                    "configured": configured,
                     "enabled": enabled,
+                    "validated": bool(
+                        connector.get("last_successful_collection")
+                        or source.get("success") is True),
+                    "collecting": (
+                        connector.get("last_collection_outcome") == "success"
+                        or source.get("success") is True),
                     "mode": str(self.config.get("collectors", {}).get(
                         name, {}).get("execution") or
                         self.config.get("runtime_mode") or "central"),

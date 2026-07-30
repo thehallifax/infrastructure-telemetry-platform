@@ -22,10 +22,10 @@ from collectors.writer import atomic_write
 
 class Freshness(str, Enum):
     FRESH = "Fresh"
+    AGING = "Aging"
     STALE = "Stale"
     UNKNOWN = "Unknown"
     NEVER_RUN = "Never Run"
-    FAILED = "Failed"
     DISABLED = "Disabled"
 
 
@@ -271,7 +271,7 @@ class OperatorCollectEngine:
 
 class OperatorStatusEngine:
     def __init__(self, root, config, *, registry=None, runtime_dir=None,
-                 now_fn=None):
+                 now_fn=None, readiness=None):
         self.root = Path(root)
         self.config = config
         self.registry = registry or ConnectorMetadataRegistry.load(self.root)
@@ -279,8 +279,11 @@ class OperatorStatusEngine:
             "ITP_RUNTIME_DIR", self.root / "runtime"))
         self.store = PipelineRunStore(self.runtime_dir / "pipeline-runs")
         self.now = now_fn or (lambda: datetime.now(timezone.utc))
+        self.readiness = {
+            value["id"]: value for value in (readiness or ())}
 
-    def _freshness(self, enabled, latest, connector_id):
+    def _freshness(self, enabled, connector_id):
+        """Describe observation age only; execution health is projected separately."""
         if not enabled:
             return Freshness.DISABLED.value
         records = [
@@ -289,11 +292,7 @@ class OperatorStatusEngine:
             if item.get("connector") == connector_id]
         if not records:
             return Freshness.NEVER_RUN.value
-        current_run, current = records[0]
-        if current.get("status") == "failed":
-            return Freshness.FAILED.value
-        if current.get("status") != "success":
-            return Freshness.UNKNOWN.value
+        current_run, _ = records[0]
         timestamp = _parse(current_run.get(
             "pipeline_run", {}).get("completed_at"))
         if timestamp is None:
@@ -301,9 +300,13 @@ class OperatorStatusEngine:
         age = (self.now().astimezone(timezone.utc) -
                timestamp.astimezone(timezone.utc)).total_seconds()
         settings = self.config.get("collectors", {}).get(connector_id, {})
-        threshold = max(60, int(settings.get(
-            "collection_interval_seconds", 300)) * 3)
-        return Freshness.FRESH.value if age <= threshold else Freshness.STALE.value
+        interval = max(60, int(settings.get(
+            "collection_interval_seconds", 300)))
+        if age <= interval * 2:
+            return Freshness.FRESH.value
+        if age <= interval * 3:
+            return Freshness.AGING.value
+        return Freshness.STALE.value
 
     def run(self):
         latest = self.store.latest()
@@ -318,14 +321,93 @@ class OperatorStatusEngine:
                     item.get("connector") == metadata.id
                     and item.get("status") == "success"
                     for item in run.get("connectors", []))]
+            records = [
+                (run, item) for run in history
+                for item in run.get("connectors", [])
+                if item.get("connector") == metadata.id]
+            failures = [
+                (run, item) for run, item in records
+                if item.get("status") == "failed"]
+            latest_record = records[0] if records else (None, None)
+            readiness = self.readiness.get(metadata.id, {})
+            latest_summary = (
+                latest_record[1].get("summary") or {}
+                if latest_record[1] else {})
+            configuration_state = readiness.get(
+                "state", "configured" if enabled else "disabled")
+            current_status = (
+                latest_record[1].get("status") if latest_record[1] else None)
+            current_reason = (
+                latest_record[1].get("reason") if latest_record[1] else None)
+            if configuration_state == "disabled":
+                operational_status = "disabled"
+                health = "Disabled"
+            elif configuration_state == "execution mode mismatch":
+                operational_status = "skipped execution mode mismatch"
+                health = "Warning"
+            elif configuration_state in {
+                    "pending configuration", "pending credentials"}:
+                operational_status = configuration_state
+                health = "Warning"
+            elif current_status == "skipped":
+                skip_reason = str(
+                    latest_record[1].get("reason") or "").casefold()
+                if "execution mode" in skip_reason or \
+                        latest_record[1].get(
+                            "exception_type") == "execution_mode_mismatch":
+                    operational_status = "skipped execution mode mismatch"
+                elif "runtime policy" in skip_reason or \
+                        "placement" in skip_reason:
+                    operational_status = "skipped runtime policy"
+                else:
+                    operational_status = "skipped prerequisite"
+                health = "Warning"
+            elif current_status == "failed":
+                lowered = str(current_reason or "").casefold()
+                if "not trusted" in lowered or "certificate" in lowered:
+                    operational_status = "TLS trust failure"
+                elif "authentication" in lowered or "http 401" in lowered:
+                    operational_status = "authentication failure"
+                elif any(value in lowered for value in (
+                        "dns", "connection", "unreachable", "timed out")):
+                    operational_status = "unreachable"
+                else:
+                    operational_status = "failed"
+                health = "Failed"
+            elif current_status == "success":
+                operational_status = "successful"
+                health = "Healthy"
+            else:
+                operational_status = "not yet collected"
+                health = "Warning" if enabled else "Disabled"
             connectors.append({
                 "connector": metadata.id,
                 "display_name": metadata.display_name,
                 "enabled": enabled,
-                "freshness": self._freshness(enabled, latest, metadata.id),
+                "configuration_state": configuration_state,
+                "status": operational_status,
+                "health": health,
+                "missing": list(readiness.get("missing") or ()),
+                "execution_mode": readiness.get("execution_mode"),
+                "runtime_mode": readiness.get("runtime_mode"),
+                "tls_verification": readiness.get("tls_verification"),
+                "freshness": self._freshness(enabled, metadata.id),
+                "last_run": (
+                    latest_record[0]["pipeline_run"]["completed_at"]
+                    if latest_record[0] else None),
                 "last_successful_collection": (
                     successes[0]["pipeline_run"]["completed_at"]
                     if successes else None),
+                "last_failure": (
+                    failures[0][0]["pipeline_run"]["completed_at"]
+                    if failures else None),
+                "last_error_summary": (
+                    failures[0][1].get("reason") if failures else None),
+                "records_collected": (
+                    latest_summary.get("points_written")
+                    or latest_summary.get("points_produced")
+                    or latest_summary.get("device_count")
+                    or 0),
             })
         services_path = self.runtime_dir / "services/service-health.json"
         try:
@@ -419,9 +501,27 @@ def render_status(payload):
     ))
     for value in payload["connectors"]:
         lines.append(
-            f"  {value['display_name']}: {value['freshness']}"
+            f"  {value['display_name']}: "
+            f"{value.get('status', value.get('configuration_state', 'configured'))}; "
+            f"health={value.get('health', 'Warning')}; "
+            f"freshness={value['freshness']}"
             + (f" — last success {value['last_successful_collection']}"
                if value["last_successful_collection"] else ""))
+        if value.get("missing"):
+            lines.append(
+                "    Missing: " + ", ".join(value["missing"]))
+        if value.get("tls_verification") is False:
+            lines.append(
+                "    WARNING: PaperCut TLS certificate verification is "
+                "disabled for this deployment.")
+        if value.get("last_run"):
+            lines.append(f"    Last run: {value['last_run']}")
+        if value.get("last_failure"):
+            lines.append(
+                f"    Last failure: {value['last_failure']} — "
+                f"{value.get('last_error_summary') or 'collection failed'}")
+        lines.append(
+            f"    Records collected: {value.get('records_collected', 0)}")
     lines.append("Service health:")
     lines.extend(
         f"  {value['service']}: {value['status']}"

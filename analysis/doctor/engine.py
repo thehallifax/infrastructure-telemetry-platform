@@ -691,6 +691,28 @@ class DoctorEngine:
                 detail=", ".join(missing_credentials),
                 remediation="Add required values to the connector's ignored secret file.",
                 command=connector.remediation_command)
+            if connector.id == "papercut":
+                verify_tls = settings.get("verify_tls", True)
+                if isinstance(verify_tls, str):
+                    verify_tls = verify_tls.strip().casefold() not in {
+                        "0", "false", "no", "off"}
+                self._result(
+                    "connector.papercut.tls", "Connectors",
+                    connector.display_name,
+                    "pass" if verify_tls else "warn",
+                    "TLS certificate verification is enabled"
+                    if verify_tls else
+                    "PaperCut TLS certificate verification is disabled for "
+                    "this deployment.",
+                    detail=(
+                        "Public trust and the deployment CA bundle are used."
+                        if verify_tls else
+                        "HTTPS traffic is vulnerable to interception or "
+                        "server impersonation."),
+                    remediation=(
+                        "" if verify_tls else
+                        "Enable verify_tls and import private CA certificates "
+                        "with ./itp credentials ca add."))
             if not connector.capabilities["doctor"]:
                 self._result(
                     f"connector.{connector.id}.doctor", "Connectors",
@@ -883,6 +905,130 @@ class DoctorEngine:
             "Operations configuration is parseable"
             if value is None or isinstance(value, dict)
             else "Operations configuration must be a mapping")
+        self._dashboard_freshness_check()
+        self._dashboard_publication_check()
+
+    def _dashboard_publication_check(self):
+        runtime = Path(os.getenv("ITP_RUNTIME_DIR", self.root / "runtime"))
+        dashboard_root = runtime / "generated/dashboard"
+        provisioning = dashboard_root / "provisioning/dashboards.yml"
+        managed = dashboard_root / (
+            "managed/operations/itp-operations-wallboard.json")
+        missing = [
+            path.relative_to(runtime).as_posix()
+            for path in (provisioning, managed) if not path.is_file()]
+        if missing:
+            self._result(
+                "operations.dashboard_publication", "Operations Engine",
+                "Grafana dashboard publication", "warn",
+                "Generated Grafana publication is incomplete",
+                detail=", ".join(missing),
+                remediation="Regenerate managed dashboards.",
+                command="./itp dashboard generate")
+            return
+        unreadable = []
+        for path in (provisioning, managed):
+            try:
+                mode = path.stat().st_mode & 0o777
+            except OSError:
+                continue
+            if os.name != "nt" and mode & 0o044 != 0o044:
+                unreadable.append(
+                    f"{path.relative_to(runtime).as_posix()} mode={mode:04o}")
+        self._result(
+            "operations.dashboard_publication", "Operations Engine",
+            "Grafana dashboard publication",
+            "warn" if unreadable else "pass",
+            "Generated Grafana files are not readable by the Grafana "
+            "container" if unreadable else
+            "Generated Grafana files follow the shared publication policy",
+            detail=", ".join(unreadable),
+            remediation=(
+                "Regenerate dashboards with the current collector image."
+                if unreadable else ""),
+            command=(
+                "./itp restart" if unreadable else ""))
+
+    @staticmethod
+    def _active_bootstrap_payload(value):
+        """Inspect active embedded content, excluding noValue fallbacks."""
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"csvContent", "content"} and isinstance(item, str):
+                    if "Waiting for first collection" in item or \
+                            "## Not Yet Collected" in item:
+                        return True
+                if DoctorEngine._active_bootstrap_payload(item):
+                    return True
+        elif isinstance(value, list):
+            return any(
+                DoctorEngine._active_bootstrap_payload(item)
+                for item in value)
+        return False
+
+    def _dashboard_freshness_check(self):
+        runtime = Path(os.getenv("ITP_RUNTIME_DIR", self.root / "runtime"))
+        dashboard = runtime / (
+            "generated/dashboard/managed/operations/"
+            "itp-operations-wallboard.json")
+        if not dashboard.is_file():
+            legacy = runtime / (
+                "dashboard/managed/operations/"
+                "itp-operations-wallboard.json")
+            if legacy.is_file():
+                dashboard = legacy
+        sources = (
+            runtime / "operations/operations.json",
+            runtime / "services/service-health.json",
+            runtime / "infrastructure/state.json",
+            runtime / "inventory/source_runs.json",
+        )
+        existing = [path for path in sources if path.is_file()]
+        if not existing:
+            self._result(
+                "operations.wallboard_freshness", "Operations Engine",
+                "Operations Wallboard", "skip",
+                "Authoritative runtime state is not available")
+            return
+        try:
+            payload = json.loads(dashboard.read_text())
+            newer = [
+                path for path in existing
+                if path.stat().st_mtime_ns > dashboard.stat().st_mtime_ns]
+            bootstrap = self._active_bootstrap_payload(payload)
+        except (OSError, json.JSONDecodeError) as exc:
+            self._result(
+                "operations.wallboard_freshness", "Operations Engine",
+                "Operations Wallboard", "warn",
+                "Generated dashboard is missing or invalid",
+                detail=type(exc).__name__,
+                remediation=(
+                    "Run the state-derived dashboard generation command."))
+            return
+        if newer or bootstrap:
+            details = []
+            if newer:
+                details.append(
+                    "newer_sources=" +
+                    ",".join(path.relative_to(runtime).as_posix()
+                             for path in newer))
+            if bootstrap:
+                details.append("active_bootstrap_payload=true")
+            self._result(
+                "operations.wallboard_freshness", "Operations Engine",
+                "Operations Wallboard", "warn",
+                "Generated dashboard is older than authoritative runtime state"
+                if newer else
+                "Generated dashboard still contains active bootstrap state",
+                detail="; ".join(details),
+                remediation=(
+                    "Regenerate state-derived dashboards and inspect "
+                    "collector logs if rendering fails."))
+            return
+        self._result(
+            "operations.wallboard_freshness", "Operations Engine",
+            "Operations Wallboard", "pass",
+            "Generated dashboard matches current authoritative runtime state")
 
     def _telemetry_contract_checks(self):
         config = self.raw_config or {}

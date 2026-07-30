@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath $WindowsBootstrap -PathType Leaf)) {
 
 if ($args.Count -gt 0 -and $args[0] -eq "prerequisites") {
     try {
-        Invoke-ITPPrerequisiteDiagnostics
+        Invoke-ITPPrerequisiteDiagnostics -Json:($args -contains "--json")
         exit $script:ITPPrerequisiteExitCode
     }
     catch {
@@ -31,11 +31,25 @@ if ($args.Count -gt 0 -and $args[0] -eq "prerequisites") {
 }
 
 try {
-    $Selected = Initialize-ITPPython -Arguments @args
+    $Selected = Initialize-ITPPython -Arguments ([string[]]$args)
 }
 catch {
     [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
+}
+
+if ($args.Count -gt 0 -and $args[0] -eq "deploy") {
+    try {
+        $PlatformPreparation = Initialize-ITPWindowsPlatform `
+            -Arguments ([string[]]$args)
+        if (-not $PlatformPreparation.Continue) {
+            exit $PlatformPreparation.ExitCode
+        }
+    }
+    catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 }
 
 $env:ITP_BOOTSTRAP_PYTHON_LABEL = $Selected.Label

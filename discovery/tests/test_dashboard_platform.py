@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -114,6 +116,63 @@ def test_enabled_papercut_pack_is_provisioned_in_printing(tmp_path):
     assert (
         tmp_path / "managed/printing/papercut-operational-overview.json"
     ).is_file()
+    dashboard = json.loads((
+        tmp_path / "managed/printing/papercut-operational-overview.json"
+    ).read_text())
+    panels = {panel["title"]: panel for panel in dashboard["panels"]}
+    assert panels["Uptime"]["options"]["colorMode"] == "none"
+    assert "informational" in panels["Uptime"]["description"]
+    for title in (
+            "Printer and Device Summary", "Licensing",
+            "Active Operational Findings"):
+        assert panels[title]["fieldConfig"]["defaults"]["noValue"] == \
+            "No Matching Records"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes are not authoritative")
+def test_generated_dashboard_artifacts_are_cross_container_readable(tmp_path):
+    value = registry(tmp_path, {"paloalto": True, "papercut": True})
+    value.generate()
+    provisioning = tmp_path / "dashboards.yml"
+    managed = (
+        tmp_path / "managed/operations/itp-operations-wallboard.json")
+
+    for path in (provisioning, managed):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o644
+        assert path.stat().st_mode & stat.S_IROTH
+        assert stat.S_IMODE(path.parent.stat().st_mode) == 0o755
+
+    value.generate()
+    assert stat.S_IMODE(provisioning.stat().st_mode) == 0o644
+    assert stat.S_IMODE(managed.stat().st_mode) == 0o644
+
+
+def test_unselected_services_are_absent_and_enabled_collectors_remain_visible(
+        tmp_path):
+    runtime = tmp_path / "runtime"
+    config = {
+        "deployment_id": "example",
+        "collectors": {
+            "paloalto": {"enabled": True},
+            "papercut": {"enabled": True},
+        },
+    }
+    value = DashboardRegistry(
+        ROOT, config, runtime / "dashboard/managed",
+        runtime / "dashboard/provisioning/dashboards.yml")
+    value.generate()
+    dashboard = json.loads((
+        runtime / "dashboard/managed/infrastructure/"
+        "itp-infrastructure-overview.json").read_text())
+    titles = {panel["title"] for panel in dashboard["panels"]}
+    assert {"DNS", "DHCP", "Active Directory"}.isdisjoint(titles)
+    assert {"PaperCut", "Firewalls"} <= titles
+    assert (
+        runtime / "dashboard/managed/vendor/"
+        "paloalto-operational-overview.json").is_file()
+    assert (
+        runtime / "dashboard/managed/printing/"
+        "papercut-operational-overview.json").is_file()
 
 
 def test_generation_is_deterministic_managed_and_removes_stale_only(tmp_path):
@@ -136,6 +195,151 @@ def test_generation_is_deterministic_managed_and_removes_stale_only(tmp_path):
         assert any(value.startswith("itp-pack-version:")
                    for value in dashboard["tags"])
         assert dashboard["editable"] is False
+
+
+def _write_current_runtime_state(runtime):
+    def write(relative, value):
+        path = runtime / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value))
+
+    generated = "2026-07-30T01:00:00Z"
+    write("inventory/source_runs.json", {"sources": {
+        "paloalto": {"last_run": {
+            "success": True, "completed_at": generated},
+            "last_complete_successful_run": {"completed_at": generated},
+            "last_failed_run": {
+                "success": False,
+                "completed_at": "2026-07-29T01:00:00Z",
+                "error_category": "historical_failure"},
+            "consecutive_failures": 0},
+        "papercut": {"last_run": {
+            "success": True, "completed_at": generated},
+            "last_complete_successful_run": {"completed_at": generated},
+            "consecutive_failures": 0},
+    }})
+    write("infrastructure/state.json", {
+        "generated_at": generated, "deployment_id": "example",
+        "assets": [{
+            "canonical_id": "asset:paloalto:1", "hostname": "EDGE-1",
+            "device_type": "firewall", "online": True,
+            "site": {"site_id": "site:example-corporate",
+                     "display_name": "Northwind College"},
+            "sources": ["paloalto"]}], "signals": {"wan": [{
+                "name": "ethernet1/1", "display_name": "Primary",
+                "role": "primary", "classification_authoritative": True,
+                "available": True, "site_id": "site:example-corporate",
+                "samples": [{"time": generated,
+                             "rx_bps": 1000, "tx_bps": 500}],
+            }]},
+        "collectors": [
+            {"collector": "paloalto", "status": "healthy",
+             "last_run": generated, "last_successful_run": generated},
+            {"collector": "papercut", "status": "healthy",
+             "last_run": generated, "last_successful_run": generated}],
+        "summary": {"devices": 0, "online": 0, "offline": 0,
+                    "collectors_healthy": 2, "collectors_failed": 0}})
+    write("operations/operations.json", {
+        "generated_at": generated, "issues": [], "risks": [],
+        "recommendations": []})
+    services = [
+        {"service": name, "status": (
+            "Healthy" if name in {"Internet", "Security", "Monitoring"}
+            else "Not Enabled"), "summary": "Current evidence.",
+         "severity": "Info", "affected_assets": [], "affected_users": None,
+         "last_change": generated, "evidence": []}
+        for name in (
+            "Internet", "Wireless", "Switching", "Printing", "Identity",
+            "Compute", "Storage", "Voice", "Email", "Security",
+            "Monitoring")]
+    write("services/service-health.json", {
+        "generated_at": generated, "sites": [],
+        "estate": {"site_id": "all", "site_name": "All Sites",
+                   "overall_status": "Healthy", "services": services}})
+    write("capabilities/collectors.json", {"collectors": {
+        name: {
+            "execution": {"state": "collected"},
+            "last_collection": {
+                "observed_at": generated, "last_success": generated,
+                "points_written": 10}}
+        for name in ("paloalto", "papercut")}})
+
+
+def test_state_derived_refresh_uses_runtime_and_preserves_vendor_dashboards(
+        tmp_path):
+    runtime = tmp_path / "runtime"
+    value = DashboardRegistry(
+        ROOT, {"deployment_id": "example", "collectors": {
+            "paloalto": {"enabled": True},
+            "papercut": {"enabled": True}}},
+        runtime / "dashboard/managed",
+        runtime / "dashboard/provisioning/dashboards.yml")
+    value.generate()
+    vendor_paths = (
+        runtime / "dashboard/managed/vendor/"
+        "paloalto-operational-overview.json",
+        runtime / "dashboard/managed/printing/"
+        "papercut-operational-overview.json",
+    )
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in vendor_paths}
+    bootstrap = json.loads((
+        runtime / "dashboard/managed/operations/"
+        "itp-operations-wallboard.json").read_text())
+    assert any(
+        "Waiting for first collection" in str(
+            target.get("csvContent") or "")
+        for panel in bootstrap["panels"]
+        for target in panel.get("targets", []))
+    _write_current_runtime_state(runtime)
+
+    result = value.refresh_state_derived()
+
+    assert {Path(path).name for path in result["published"]} == {
+        "itp-operations-wallboard.json",
+        "itp-infrastructure-overview.json",
+        "itp-collector-health.json"}
+    assert all((path.read_bytes(), path.stat().st_mtime_ns) == before[path]
+               for path in vendor_paths)
+    dashboard = json.loads((
+        runtime / "dashboard/managed/operations/"
+        "itp-operations-wallboard.json").read_text())
+    active = "\n".join(
+        str(value.get(key) or "")
+        for panel in dashboard["panels"]
+        for key, value in (
+            ("content", panel.get("options", {})),
+            ("csvContent", (panel.get("targets") or [{}])[0])))
+    assert "Waiting for first collection" not in active
+    assert "## Not Yet Collected" not in active
+    assert "historical_failure" not in active
+    assert "all,Healthy" in active
+    assert any(
+        panel.get("fieldConfig", {}).get("defaults", {}).get("noValue")
+        == "Not Yet Collected" for panel in dashboard["panels"])
+
+
+def test_state_derived_render_failure_preserves_managed_wallboard(
+        tmp_path, monkeypatch):
+    runtime = tmp_path / "runtime"
+    value = DashboardRegistry(
+        ROOT, {"collectors": {}}, runtime / "dashboard/managed",
+        runtime / "dashboard/provisioning/dashboards.yml")
+    value.generate()
+    destination = runtime / (
+        "dashboard/managed/operations/itp-operations-wallboard.json")
+    previous = destination.read_bytes()
+    original = value._managed_dashboard
+
+    def fail(path, declaration, capabilities):
+        if declaration["uid"] == "itp-operations-wallboard":
+            raise ValueError("invalid generated wallboard")
+        return original(path, declaration, capabilities)
+
+    monkeypatch.setattr(value, "_managed_dashboard", fail)
+    with pytest.raises(ValueError, match="invalid generated wallboard"):
+        value.refresh_state_derived()
+    assert destination.read_bytes() == previous
 
 
 def test_pack_versions_metadata_and_disabled_pack_cleanup(tmp_path):

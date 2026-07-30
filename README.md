@@ -42,6 +42,11 @@ The default bind address is `127.0.0.1`, so Grafana is initially available only
 on the deployment host. Retrieve its generated login with
 `.\itp.ps1 credentials grafana` on Windows or
 `./itp credentials grafana` on macOS/Linux.
+During an interactive deployment, choose the recommended generated Grafana
+password or enter and confirm a custom password of at least 12 characters.
+The generated password is shown once in the successful deployment summary and
+is otherwise read from the deployment's protected runtime environment by the
+credentials command.
 
 The examples below use the macOS/Linux launcher. On Windows PowerShell, replace
 `./itp` with `.\itp.ps1`.
@@ -49,18 +54,30 @@ The examples below use the macOS/Linux launcher. On Windows PowerShell, replace
 Useful commands:
 
 ```sh
+./itp collector list
+./itp collector add <collector>
+./itp collector test <collector>
+./itp collect
 ./itp doctor
 ./itp status
-./itp collector list
-./itp collector add snmp
-./itp collector test snmp
 ./itp dashboard generate
 ./itp restart
-./itp logs
+./itp logs collector
 ```
 
+Runtime commands infer the active deployment. Select one explicitly with
+`--deployment <deployment-id>`, or make it active with
+`./itp deployment select <deployment-id>`. Connector implementations run in
+the shared `collector` service; use `./itp logs collector` for connector
+runtime diagnostics.
+
+Dashboard generation reports the managed dashboards and folders it refreshed.
+Grafana polls the generated provisioning tree automatically; a restart is not
+normally required.
+
 Use `./itp deploy --verbose` on macOS/Linux or
-`.\itp.ps1 deploy --verbose` on Windows when diagnosing Docker build or startup
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\itp.ps1 deploy --verbose`
+on Windows when diagnosing Docker build or startup
 output.
 
 Windows prerequisite diagnostics are read-only:
@@ -68,6 +85,12 @@ Windows prerequisite diagnostics are read-only:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\itp.ps1 prerequisites
 ```
+
+On Windows, deployment can enable WSL and Virtual Machine Platform after
+explicit consent. Feature changes require administrator approval and usually a
+restart. ITP resumes automatically after the restart; Docker Desktop itself
+must still be installed and started by the operator. Add `--json` to the
+prerequisite command for structured output.
 
 ## Supported collectors
 
@@ -88,6 +111,9 @@ tree.
 - [Windows installation](docs/INSTALL_WINDOWS.md)
 - [deployment runtime](docs/DEPLOYMENT_RUNTIME.md)
 - [collector onboarding](docs/COLLECTOR_ONBOARDING.md)
+- [capability lifecycle](docs/collector-capabilities.md)
+- [dashboard model](docs/dashboard-platform.md)
+- [troubleshooting](docs/TROUBLESHOOTING.md)
 - [security and secrets](docs/SECURITY_AND_SECRETS.md)
 - [upgrades](docs/UPGRADE.md)
 - [architecture](docs/architecture.md)

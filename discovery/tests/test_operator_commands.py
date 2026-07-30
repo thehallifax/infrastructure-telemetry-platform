@@ -92,7 +92,7 @@ def test_collect_records_pipeline_run_and_redacts_results(tmp_path):
     assert "Alpha" in render_collect(result)
 
 
-def write_run(store, connector, status, completed):
+def write_run(store, connector, status, completed, *, reason="", points=0):
     store.write({
         "schema_version": 1,
         "deployment_identity": "test-estate",
@@ -107,8 +107,9 @@ def write_run(store, connector, status, completed):
             "skipped_scopes": [], "scopes": [], "warning_details": []},
         "connectors": [{
             "connector": connector, "display_name": connector,
-            "status": status, "duration_ms": 1, "summary": {},
-            "exception_type": "", "reason": ""}],
+            "status": status, "duration_ms": 1,
+            "summary": {"points_written": points},
+            "exception_type": "", "reason": reason}],
         "summary": {},
     })
 
@@ -126,13 +127,23 @@ def test_status_reports_service_health_success_and_freshness(tmp_path):
 
     result = OperatorStatusEngine(
         tmp_path, config(beta=False), registry=Registry(),
-        runtime_dir=runtime, now_fn=lambda: NOW).run()
+        runtime_dir=runtime, now_fn=lambda: NOW,
+        readiness=(
+            {"id": "alpha", "state": "configured", "missing": []},
+            {"id": "beta", "state": "disabled", "missing": []},
+            {"id": "gamma", "state": "disabled", "missing": []},
+        )).run()
     states = {value["connector"]: value["freshness"]
               for value in result["connectors"]}
     assert states == {
         "alpha": "Fresh", "beta": "Disabled", "gamma": "Disabled"}
+    assert result["connectors"][0]["health"] == "Healthy"
     assert result["connectors"][0]["last_successful_collection"] == \
         "2026-07-24T07:59:00Z"
+    assert result["connectors"][0]["configuration_state"] == "configured"
+    assert result["connectors"][0]["last_run"] == "2026-07-24T07:59:00Z"
+    assert result["connectors"][0]["last_failure"] is None
+    assert result["connectors"][0]["records_collected"] == 0
     assert result["service_health"] == [
         {"service": "Internet", "status": "Healthy"},
         {"service": "Wireless", "status": "Warning"},
@@ -142,9 +153,10 @@ def test_status_reports_service_health_success_and_freshness(tmp_path):
 
 def test_status_freshness_states_are_deterministic(tmp_path):
     scenarios = (
+        ("success", NOW - timedelta(seconds=150), "Aging"),
         ("success", NOW - timedelta(seconds=181), "Stale"),
-        ("failed", NOW - timedelta(seconds=1), "Failed"),
-        ("skipped", NOW - timedelta(seconds=1), "Unknown"),
+        ("failed", NOW - timedelta(seconds=1), "Fresh"),
+        ("skipped", NOW - timedelta(seconds=1), "Fresh"),
     )
     for index, (run_status, at, expected) in enumerate(scenarios):
         runtime = tmp_path / str(index)
@@ -162,6 +174,72 @@ def test_status_freshness_states_are_deterministic(tmp_path):
     assert empty["latest_pipeline_run"] is None
 
 
+def test_status_recovery_uses_latest_result_and_preserves_failure_history(
+        tmp_path):
+    runtime = tmp_path / "runtime"
+    store = PipelineRunStore(runtime / "pipeline-runs")
+    write_run(
+        store, "alpha", "failed", "2026-07-24T07:55:00Z",
+        reason="connection unreachable")
+    write_run(
+        store, "alpha", "success", "2026-07-24T07:59:00Z", points=33)
+
+    result = OperatorStatusEngine(
+        tmp_path, config(beta=False), registry=Registry(),
+        runtime_dir=runtime, now_fn=lambda: NOW).run()
+    alpha = result["connectors"][0]
+
+    assert alpha["status"] == "successful"
+    assert alpha["health"] == "Healthy"
+    assert alpha["freshness"] == "Fresh"
+    assert alpha["records_collected"] == 33
+    assert alpha["last_successful_collection"] == "2026-07-24T07:59:00Z"
+    assert alpha["last_failure"] == "2026-07-24T07:55:00Z"
+    assert alpha["last_error_summary"] == "connection unreachable"
+
+
+def test_freshness_is_independent_from_current_health(tmp_path):
+    runtime = tmp_path / "runtime"
+    store = PipelineRunStore(runtime / "pipeline-runs")
+    write_run(
+        store, "alpha", "failed", "2026-07-24T07:59:00Z",
+        reason="current failure")
+    result = OperatorStatusEngine(
+        tmp_path, config(beta=False), registry=Registry(),
+        runtime_dir=runtime, now_fn=lambda: NOW).run()
+    alpha = result["connectors"][0]
+    assert alpha["freshness"] == "Fresh"
+    assert alpha["health"] == "Failed"
+
+    older = tmp_path / "older"
+    write_run(
+        PipelineRunStore(older / "pipeline-runs"), "alpha", "success",
+        "2026-07-24T07:55:00Z")
+    stale = OperatorStatusEngine(
+        tmp_path, config(beta=False), registry=Registry(),
+        runtime_dir=older, now_fn=lambda: NOW).run()["connectors"][0]
+    assert stale["freshness"] == "Stale"
+    assert stale["health"] == "Healthy"
+
+
+def test_status_mixed_connectors_project_only_their_latest_results(tmp_path):
+    runtime = tmp_path / "runtime"
+    store = PipelineRunStore(runtime / "pipeline-runs")
+    write_run(store, "alpha", "failed", "2026-07-24T07:55:00Z",
+              reason="historical PaperCut failure")
+    write_run(store, "alpha", "success", "2026-07-24T07:59:00Z", points=34)
+    write_run(store, "beta", "failed", "2026-07-24T07:59:30Z",
+              reason="current Palo Alto failure")
+    result = OperatorStatusEngine(
+        tmp_path, config(gamma=False), registry=Registry(),
+        runtime_dir=runtime, now_fn=lambda: NOW).run()
+    values = {value["connector"]: value for value in result["connectors"]}
+    assert values["alpha"]["health"] == "Healthy"
+    assert values["alpha"]["status"] == "successful"
+    assert values["beta"]["health"] == "Failed"
+    assert values["beta"]["status"] == "failed"
+
+
 def test_status_json_contains_no_configuration_or_secrets(tmp_path):
     result = OperatorStatusEngine(
         tmp_path, {
@@ -176,6 +254,55 @@ def test_status_json_contains_no_configuration_or_secrets(tmp_path):
     rendered = json.dumps(result, sort_keys=True)
     assert "super-secret" not in rendered
     assert json.loads(rendered)["deployment_identity"] == "test-estate"
+
+
+def test_status_reports_missing_identifiers_without_secret_values(tmp_path):
+    result = OperatorStatusEngine(
+        tmp_path, config(beta=False), registry=Registry(),
+        runtime_dir=tmp_path / "runtime", now_fn=lambda: NOW,
+        readiness=(
+            {"id": "alpha", "state": "pending credentials",
+             "missing": ["ALPHA_API_TOKEN"]},
+            {"id": "beta", "state": "disabled", "missing": []},
+            {"id": "gamma", "state": "disabled", "missing": []},
+        )).run()
+    rendered = render_status(result)
+    assert "pending credentials" in rendered
+    assert "Missing: ALPHA_API_TOKEN" in rendered
+    assert "secret-value" not in rendered
+    assert result["connectors"][0]["status"] == "pending credentials"
+    assert result["connectors"][1]["status"] == "disabled"
+
+
+def test_status_surfaces_papercut_tls_policy(tmp_path):
+    result = OperatorStatusEngine(
+        tmp_path, config(beta=False), registry=Registry(),
+        runtime_dir=tmp_path / "runtime", now_fn=lambda: NOW,
+        readiness=(
+            {"id": "alpha", "state": "configured", "missing": [],
+             "tls_verification": False},
+            {"id": "beta", "state": "disabled", "missing": []},
+            {"id": "gamma", "state": "disabled", "missing": []},
+        )).run()
+    assert result["connectors"][0]["tls_verification"] is False
+    assert "TLS certificate verification is disabled" in render_status(result)
+
+
+def test_status_distinguishes_execution_mode_mismatch(tmp_path):
+    result = OperatorStatusEngine(
+        tmp_path, config(beta=False), registry=Registry(),
+        runtime_dir=tmp_path / "runtime", now_fn=lambda: NOW,
+        readiness=(
+            {"id": "alpha", "state": "execution mode mismatch", "missing": [],
+             "execution_mode": "edge", "runtime_mode": "central"},
+            {"id": "beta", "state": "disabled", "missing": []},
+            {"id": "gamma", "state": "disabled", "missing": []},
+        )).run()
+    alpha = result["connectors"][0]
+    assert alpha["status"] == "skipped execution mode mismatch"
+    assert alpha["execution_mode"] == "edge"
+    assert alpha["runtime_mode"] == "central"
+    assert "skipped execution mode mismatch" in render_status(result)
 
 
 def test_scheduler_one_shot_isolates_connector_failures(caplog):

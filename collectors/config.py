@@ -124,6 +124,9 @@ def load_config(path):
     if value.get("site_id"):
         writer.setdefault("site_id", value["site_id"])
         writer.setdefault("site_name", value.get("site_name", ""))
+    ca_bundle = os.getenv("ITP_CA_BUNDLE", "").strip()
+    if ca_bundle:
+        value.setdefault("tls", {})["ca_bundle"] = ca_bundle
     collectors = value.get("collectors", {})
     if not isinstance(collectors, dict): raise ValueError("collectors configuration must be a mapping")
     for name, settings in collectors.items():
@@ -135,6 +138,7 @@ def load_config(path):
     sites = os.getenv("SITES_CONFIG")
     if runtime:
         base = Path(runtime)
+        dashboard = base / "generated/dashboard"
         defaults = {
             "inventory": {},
             "infrastructure": {
@@ -147,22 +151,22 @@ def load_config(path):
             "operations": {
                 "inventory_path": str(base / "inventory"),
                 "output_path": str(base / "operations"),
-                "dashboard_output": str(base / "dashboard/grafana/infrastructure-overview.json"),
-                "capability_registry": str(base / "dashboard/managed/registry.json"),
+                "dashboard_output": str(dashboard / "grafana/infrastructure-overview.json"),
+                "capability_registry": str(dashboard / "managed/registry.json"),
             },
             "services": {
                 "infrastructure_state": str(base / "infrastructure/state.json"),
                 "operations_state": str(base / "operations/operations.json"),
-                "capability_registry": str(base / "dashboard/managed/registry.json"),
+                "capability_registry": str(dashboard / "managed/registry.json"),
                 "output_path": str(base / "services"),
             },
             "wallboard": {
                 "infrastructure_state": str(base / "infrastructure/state.json"),
                 "operations_state": str(base / "operations/operations.json"),
                 "sites_state": str(base / "sites/sites.json"),
-                "summary_output": str(base / "dashboard/wallboard-summary.json"),
-                "dashboard_output": str(base / "dashboard/operations/operations-wallboard.json"),
-                "capability_registry": str(base / "dashboard/managed/registry.json"),
+                "summary_output": str(dashboard / "wallboard-summary.json"),
+                "dashboard_output": str(dashboard / "operations/operations-wallboard.json"),
+                "capability_registry": str(dashboard / "managed/registry.json"),
                 "service_health": str(base / "services/service-health.json"),
             },
             "state_history": {
@@ -172,7 +176,21 @@ def load_config(path):
         for section, settings in defaults.items():
             target = value.setdefault(section, {})
             for key, setting in settings.items():
-                target.setdefault(key, setting)
+                current = target.get(key)
+                # Tracked templates use /app/runtime as a portable container
+                # placeholder. Rebase only those defaults to the selected
+                # deployment root; preserve genuinely custom paths.
+                if isinstance(current, str) and current.startswith(
+                        "/app/runtime/dashboard/"):
+                    target[key] = str(
+                        dashboard /
+                        current.removeprefix("/app/runtime/dashboard/"))
+                elif isinstance(current, str) and current.startswith(
+                        "/app/runtime/"):
+                    target[key] = str(
+                        base / current.removeprefix("/app/runtime/"))
+                else:
+                    target.setdefault(key, setting)
         if sites:
             value["infrastructure"].setdefault("sites_config", sites)
             value["services"].setdefault("sites_config", sites)
