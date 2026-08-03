@@ -10,7 +10,7 @@ from analysis.infrastructure.adapters import AdapterResult
 from analysis.infrastructure.fusion import FusionEngine
 from collectors.paloalto.api import PaloAltoClient
 from collectors.paloalto.collector import (PaloAltoCollector, _add_wan_rate_samples,
-                                            validate_settings)
+                                            _publish_wan_rates, validate_settings)
 from collectors.paloalto.mapper import map_snapshot
 from collectors.paloalto.models import (CapabilityResult, PaloAltoCredentialError,
                                         Snapshot)
@@ -269,6 +269,23 @@ def test_wan_configuration_is_explicit_and_validated(monkeypatch):
             {"name": "ethernet1/2", "role": "primary"}]))
 
 
+def test_wan_inventory_preserves_canonical_and_display_identity():
+    parsed = {
+        "system": parser.system(result(SYSTEM)),
+        "interfaces": parser.interfaces(result(INTERFACES)),
+    }
+    # Use an interface present in the deterministic fixture.
+    settings = validate_settings(config(wan_interfaces=[{
+        "name": "ethernet1/2", "role": "secondary",
+        "display_name": "WAN 2"}]))
+    record, _ = map_snapshot(parsed, settings, "2026-01-01T00:00:00Z")
+    wan = record["extensions"]["wan_interfaces"][0]
+    assert wan["interface_name"] == wan["name"] == "ethernet1/2"
+    assert wan["display_name"] == "WAN 2"
+    assert wan["role"] == "secondary"
+    assert wan["device_id"] == "paloalto:0123456789"
+
+
 def test_expired_perpetual_and_malformed_licence_semantics():
     xml = """<response status="success"><result><licenses>
     <entry name="Expired"><expires>January 01, 2024</expires></entry>
@@ -316,3 +333,38 @@ def test_wan_rate_samples_are_bounded_and_counter_resets_are_omitted():
         "time": "2026-07-23T00:01:00Z", "rx_bps": 8.0,
     }
     assert samples[0]["tx_bps"] == 16
+
+
+def test_first_wan_observation_is_baseline_and_display_name_is_not_query_key():
+    record = {"extensions": {"wan_interfaces": [{
+        "name": "WAN 1", "interface_name": "ethernet1/5",
+        "observed_at": "2026-07-23T00:00:00Z",
+        "rx_bytes_total": 100, "tx_bytes_total": 200,
+    }]}}
+    points = [{"measurement": "interface",
+               "tags": {"interface_name": "ethernet1/5"},
+               "fields": {"wan_display_name": "WAN 1"}}]
+    _add_wan_rate_samples(record, None)
+    _publish_wan_rates(points, record)
+    assert "samples" not in record["extensions"]["wan_interfaces"][0]
+    assert "rx_bps" not in points[0]["fields"]
+
+
+def test_two_wan_observations_publish_canonical_rate_fields():
+    previous = {"extensions": {"wan_interfaces": [{
+        "name": "WAN 1", "interface_name": "ethernet1/5",
+        "observed_at": "2026-07-23T00:00:00Z",
+        "rx_bytes_total": 100, "tx_bytes_total": 200,
+    }]}}
+    current = {"extensions": {"wan_interfaces": [{
+        "name": "Friendly Primary", "interface_name": "ethernet1/5",
+        "observed_at": "2026-07-23T00:01:00Z",
+        "rx_bytes_total": 160, "tx_bytes_total": 320,
+    }]}}
+    points = [{"measurement": "interface",
+               "tags": {"interface_name": "ethernet1/5"}, "fields": {}}]
+    _add_wan_rate_samples(current, previous)
+    _publish_wan_rates(points, current)
+    assert points[0]["fields"]["rx_bps"] == 8.0
+    assert points[0]["fields"]["tx_bps"] == 16.0
+    assert points[0]["tags"]["interface_name"] == "ethernet1/5"

@@ -130,9 +130,15 @@ def test_wan_panel_repeats_per_interface_without_aggregation():
     assert panel["gridPos"]["w"] == 12
     assert panel["gridPos"]["h"] >= 9
     assert "interface_name = ${wan_interface:sqlstring}" in sql
+    assert "rx_bps" in sql and "tx_bps" in sql
+    assert "LAG(" not in sql and "rx_bytes_total" not in sql
     assert 'AS "Download"' in sql and 'AS "Upload"' in sql
     assert "PARTITION BY hostname, interface_name" not in sql
+    assert "LAG(" not in sql and "bytes_total" not in sql
+    assert "time >= $__timeFrom" in sql and "time <= $__timeTo" in sql
     assert panel["fieldConfig"]["defaults"]["unit"] == "bps"
+    assert panel["fieldConfig"]["defaults"]["custom"]["spanNulls"] is False
+    assert panel["fieldConfig"]["defaults"]["custom"]["insertNulls"] == 180000
     assert panel["options"]["legend"]["calcs"] == ["lastNotNull"]
 
 

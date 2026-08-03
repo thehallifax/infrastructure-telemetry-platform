@@ -98,9 +98,17 @@ Operational commands and parsed paths:
 | `show session info` | `num-active`, `num-max`, `num-tcp`, `num-udp` |
 | `request license info` | `licenses/entry/{feature,status,expires,expired}` |
 
-Interface counters remain cumulative. Grafana derives rates and discards
-negative deltas after a reboot or counter reset. Optional missing counters do
-not fail collection.
+Interface counters remain cumulative. The collector derives rates and discards
+negative deltas after a reboot or counter reset. It publishes
+canonical `rx_bps` and `tx_bps` fields after comparing successive observations.
+The first observation establishes a baseline, so a new process or deployment
+may require two successful collections before throughput appears. Duplicate
+timestamps, missing counters and counter resets produce no rate rather than a
+fabricated or negative value. Optional missing counters do not fail collection.
+Both the Operations Wallboard and Palo Alto Operational Overview query these
+canonical `interface` rate fields across the selected Grafana time range. Chart
+density therefore follows the collector cadence. Missing observations remain
+gaps rather than being converted to zero or connected across a long outage.
 
 Local read-only smoke test:
 
@@ -147,6 +155,17 @@ down is Critical; primary down with a working backup is Warning; stale,
 missing, invalid, or unconfigured evidence is Unknown. Security health uses
 firewall availability, subscription expiry, and device-certificate state.
 Content age does not become Critical without an explicit policy.
+
+`wan_interfaces[].name` is the stable PAN-OS interface identifier used in
+telemetry tags and dashboard filters. `display_name` is presentation metadata
+used in titles only; it is never substituted into an `interface_name` SQL
+predicate. To inspect names before configuration, run a collection
+and open Interface Inventory, or inspect the shared collector diagnostics:
+
+```sh
+./itp collector run paloalto --deployment <deployment>
+./itp logs collector --deployment <deployment>
+```
 
 ## Dashboard regeneration
 
